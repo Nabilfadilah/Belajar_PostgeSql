@@ -240,3 +240,483 @@ select category, COUNT(id) as total
 FROM products
 GROUP BY category
 HAVING COUNT(id) > 1;
+
+-----
+-- constraint
+-- unique constraint
+-- membuat table dengan unique constraint
+create table customer(
+	id 		serial not null,
+	email 		varchar(100) not null,
+	first_name	varchar(100) not null,
+	last_name	varchar(100),
+	primary key (id),
+	constraint unique_email unique (email)
+);
+
+
+-- menambah/menghapus unique constraint
+alter table customer
+drop constraint unique_email;
+
+alter table customer           -- menambah bila terlanjur sudah dibuat table
+add constraint unique_email unique (email);
+
+
+-- check constraint 
+-- membuat table dengan check constraint
+create table products(
+	id			varchar(100) not null,
+	name		varchar(100) not null,
+	description text,
+	price		int not null,
+	quantity	int not null,
+	created_at	timestamp not null default CURRENT_TIMESTAMP,
+	PRIMARY KEY (id),
+	CONSTRAINT price_check CHECK (price >= 1000)
+);
+
+-- menambah/menghapus check constraint
+alter table products
+drop constraint price_check;
+
+alter table products  -- menambah bila terlanjur sudah dibuat table
+add constraint price_check CHECK (price >= 1000);
+
+alter table products -- menambah bila terlanjur sudah dibuat table
+add constraint quantity_check CHECK (quantity >= 0);
+
+-- index --
+-- membuat table
+create table sellers(
+	id		serial not null,
+	name	varchar(100) not null,
+	email	varchar(100) not null,
+	PRIMARY KEY (id),
+	CONSTRAINT email_unique UNIQUE (email)
+);
+
+-- mencari dengan index
+select * from sellers where id = 1;
+select * from sellers where id = 1 OR name 'Toko Toni';
+select * from sellers where email = 'jaja@gmail.com';
+
+-- menambah/menghapus Index
+create index sellers_id_and_name_index ON sellers(id, name);
+create index sellers_email_and_name_index ON sellers(email, name);
+
+-- full-text search
+-- mencari tanpa index
+select * from products where to_tsvector(name) @@ to_tsquery('mie');
+
+-- fulll-text search index
+-- membuat index full-text search
+select cfgname from pg_ts_config;
+create index products_name_search ON products USING GIN (to_tsvector('indonesian', name));
+create index products_description_search ON products USING GIN (to_tsvector('indonesian', description));
+
+drop index products_name_search;
+drop index products_description_search;
+
+-- mencari menggunakan fulll-text search
+select * from products 
+where name @@ to_tsquery('mie');
+
+select * from products 
+where description @@ to_tsquery('mie');
+
+-- query operator
+-- mencari dengan operator
+select * from products
+where name @@ to_tsquery('original | bakso');
+
+select * from products
+where name @@ to_tsquery('bakso & tahu');
+
+select * from products
+where name @@ to_tsquery('!bakso');
+
+-- tipe data TSVECTOR
+
+-- table relationship --
+-- membuat table dengan foreign key
+create table wishlist(
+	id serial not null,
+	id_product varchar(10) not null,
+	description text,
+	primary key (id),
+	constraint fk_wishlist_product FOREIGN KEY (id_product) REFERENCES products (id)
+);
+
+-- menambah/menghapus foreign key
+alter table wishlist
+drop constraint fk_wishlist_product;
+
+alter table wishlist -- jika tablenya sudah dibuat tinggal tambah
+add constraint fk_wishlist_product FOREIGN KEY (id_product) REFERENCES products (id);
+
+-- mengubah behavior menghapus relasi
+alter table wishlist
+add CONSTRAINT fk_wishlist_product FOREIGN KEY (id_product) REFERENCES products (id) 
+ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- contoh menambah data pada table product dan wishlist
+insert into products(id, name, price, quantity, category)
+values ('XXX', 'Xxx', 10000, 100, 'Minuman');
+
+select * from products;
+insert into wishlist(id_product, description) values ('XXX', 'Contoh');
+
+select * from wishlist;
+
+delete from products where id = 'XXX';
+
+-- join --
+-- melakukan join table
+select * from wishlist JOIN products ON wishlist.id_product = products.id;
+select * from wishlist JOIN products ON products.id = wishlist.id_product;
+
+select products.id, products.name, wishlist.description
+FROM wishlist JOIN products ON products.id = wishlist.id_product;
+
+-- membuat relasi ke table customers
+alter table wishlist ADD COLUMN id_customer INT;
+
+alter table wishlist ADD constraint fk_wishlist_customer FOREIGN KEY (id_customer) REFERENCES customer (id);
+
+-- update table untuk rubah id_customer
+select * from customer;
+update wishlist 
+set id_customer = 1
+where id in (2,3);
+
+update wishlist 
+set id_customer = 4
+where id = 3;
+
+-- Melakukan JOIN Multiple Table
+select c.email, p.id, p.name, w.description
+from wishlist as w
+         join products as p on w.id_product = p.id
+         join customer as c on c.id = w.id_customer;
+
+
+-- one to one relationship --
+-- membuat table wallet
+create table wallet
+(
+    id          serial not null,
+    id_customer int    not null,
+    balance     int    not null default 0,
+    primary key (id),
+    constraint wallet_customer_unique unique (id_customer),
+    constraint fk_wallet_customer foreign key (id_customer) references customer (id)
+);
+
+-- relasi one to one
+select *
+from customer
+         join wallet on wallet.id_customer = customer.id;
+
+-- on to many relationship --
+-- membuat table category
+create table categories
+(
+    id   varchar(10)  not null,
+    name varchar(100) not null,
+    primary key (id)
+);
+
+-- mengubah table product
+alter table products
+    add column id_category varchar(10);
+
+alter table products
+    add constraint fk_product_category foreign key (id_category) references categories (id);
+
+-- update dulu datanya
+update products
+set id_category = 'C0001'
+where category = 'Makanan';
+
+update products
+set id_category = 'C0002'
+where category = 'Minuman';
+
+-- terus hapus kolom categorynya
+alter table products
+    drop column category;
+
+-- relasi on to many
+select *
+from products
+         join categories on products.id_category = categories.id;
+
+
+-- many to many relationship --
+-- membuat table order
+create table orders
+(
+    id         serial    not null,
+    total      int       not null,
+    order_date timestamp not null default current_timestamp,
+    primary key (id)
+);
+
+-- membuat table order detail (yang di tengahnya menghubungkan table orders dan product)
+create table orders_detail
+(
+    id_product varchar(10) not null,
+    id_order   int         not null,
+    price      int         not null,
+    quantity   int         not null,
+    primary key (id_product, id_order)
+);
+
+-- membuat foreign key
+alter table orders_detail
+    add constraint fk_orders_detail_product foreign key (id_product) references products (id);
+
+alter table orders_detail
+    add constraint fk_orders_detail_order foreign key (id_order) references orders (id);
+
+-- terus buat relasinya antar table product dan order
+insert into orders_detail (id_product, id_order, price, quantity)
+values ('P0001', 1, 1000, 2),
+       ('P0003', 1, 1000, 2),
+       ('P0004', 1, 1000, 2);
+
+insert into orders_detail (id_product, id_order, price, quantity)
+values ('P0005', 2, 1000, 2),
+       ('P0006', 2, 1000, 2),
+       ('P0007', 2, 1000, 2);
+
+insert into orders_detail (id_product, id_order, price, quantity)
+values ('P0001', 3, 1000, 2),
+       ('P0004', 3, 1000, 2),
+       ('P0005', 3, 1000, 2);
+
+-- melihat data order, detail dan product-nya
+select *
+from orders
+         join orders_detail on orders_detail.id_order = orders.id
+         join products on orders_detail.id_product = products.id;
+
+-- saya ingin lihat order 3 aja!
+select *
+from orders
+         join orders_detail on orders_detail.id_order = orders.id
+         join products on orders_detail.id_product = products.id
+where orders.id = 3;
+
+-- jenis-jenis join --
+-- melakukan inner join
+select *
+from categories
+         inner join products on products.id_category = categories.id;
+
+-- melakukan left join
+select *
+from categories
+         left join products on products.id_category = categories.id;
+
+-- melakukan right join
+select *
+from categories
+         right join products on products.id_category = categories.id;
+
+-- melakukan full join
+select *
+from categories
+         full join products on products.id_category = categories.id;
+
+-- Subquery --
+-- melakukan subquery di where clause
+select *
+from products
+where price > (select avg(price) from products);
+
+-- melihat rata-rata
+select avg(price)
+from products;
+
+-- subquery di FROM
+-- melakukan subquery di form clause
+select *
+from products
+where price > (select avg(price) from products);
+
+
+-- set operator --
+-- membuat table guest book
+create table guestbooks
+(
+    id      serial       not null,
+    email   varchar(100) not null,
+    title   varchar(100) not null,
+    content text,
+    primary key (id)
+);
+
+-- union 
+-- melakukan query UNION
+select distinct email
+from customer
+union
+select distinct email
+from guestbooks;
+
+-- melakukan query union all
+select email
+from customer
+union all
+select email
+from guestbooks;
+
+-- ini untuk grup by nya ada berapa email yang munculnya
+select email, count(email)
+from (select email
+      from customer
+      union all
+      select email
+      from guestbooks) as contoh
+group by email;
+
+-- Intersect
+select email  -- query pertama
+from customer 
+intersect 
+select email  -- query kedua
+from guestbooks;
+
+
+-- Except
+select email  -- query pertama
+from customer
+except
+select email  -- query kedua
+from guestbooks;
+
+-- Transaction -- (fitur paling aman Ketika menjalan perintah apapun)
+start transaction;
+
+insert into guestbooks(email, title, content)
+values ('transaction@pzn.com', 'transaction', 'transaction');
+
+insert into guestbooks(email, title, content)
+values ('transaction@pzn.com', 'transaction', 'transaction 2');
+
+insert into guestbooks(email, title, content)
+values ('transaction@pzn.com', 'transaction', 'transaction 3');
+
+insert into guestbooks(email, title, content)
+values ('transaction@pzn.com', 'transaction', 'transaction 4');
+
+insert into guestbooks(email, title, content)
+values ('transaction@pzn.com', 'transaction', 'transaction 5');
+
+commit; -- kalau jadi tambah datanya 
+rollback; -- kalau tidak jadi tambah datanya
+
+-- Locking -- mengunci data
+-- jika kita belum selesai melakukan proses, belum commit maka proses apapun yang terjadi di data yang sama tidak akan dilakukan, jadi harus menunggu dulu data sebelumnya di commit, baru bisa merubah datanya.
+
+-- locking otomatis
+start transaction;
+
+update products
+set description = 'Mie ayam original enak'
+where id = 'P0001';
+
+select * from products
+where id = 'P0001';
+
+commit;
+
+-- locking record manual
+start transaction;
+
+select * from products
+where id = 'P0001' for update; -- tinggal tambahkan for update, hasilnya sama seperti locing otomatis
+
+rollback;
+
+select * from products
+where id = 'P0001';
+
+
+-- Deadlock (terjadi 2 proses bersamaan yang dilakukan dan menunggu satu sama lain)
+start transaction;
+
+select * from products
+where id = 'P0001' for update;
+
+select * from products
+where id = 'P0003' for update;
+
+rollback;
+
+-- Melihat schema saat ini
+select current_schema();
+SHOW search_path();
+
+-- Membuat dan menghapus Schema 
+create schema contoh;
+
+drop schema contoh; -- hati-hati akan menghapus semua table di schema itu
+
+-- pindah schema
+SET search_path TO contoh;
+
+select current_schema();
+
+
+-- membuat table di schema
+create table contoh.products
+(
+    id   serial       not null,
+    name varchar(100) not null,
+    primary key (id)
+);
+
+-- cara atur sql untuk schema lain yang di luar schema saat ini
+select * from contoh.products; -- tinggal sebutkan nama schema nya .+ tablenya
+
+SET search_path TO public;
+
+insert into contoh.products(name)
+values ('iphone'),
+       ('Play Station');
+
+select * from contoh.products;
+
+-- Role --
+-- Membuat atau menghapus User
+create ROLE fadilah;
+create ROLE qiol;
+
+drop ROLE fadilah;
+drop ROLE qiol; 
+
+-- menambah option ke user
+alter role fadilah login password 'rahasia';
+
+alter role qiol login password 'rahasia';
+
+-- menambah Hak Akses (agar user tidak sembarangan merubah data)
+grant insert, update, select on all tables in schema public to fadilah;
+grant usage, select, update ON guestbooks_id_seq TO fadilah;
+grant insert, update, select on customer to qiol;
+
+-------------------
+cara running server with psql di cmd:
+psql --host=localhost --port=5432 --dbname=belajar --username=qiol --password
+-------------------
+
+cara backup database:
+pg_dump --host=localhost --port=5432 --dbname=belajar --username=postgres --format=plain --file=/Users/Asus/backup.sql
+
+cara restore database, tapi harus buat dulu table datanya:
+create database belajar_restore;
+psql --host=localhost --port=5432 --dbname=belajar_restore --username=postgres --file=/Users/Asus/backup.sql
+
